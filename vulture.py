@@ -127,6 +127,7 @@ class Vulture(ast.NodeVisitor):
         self.defined_props = get_list('defined_props')
         self.defined_vars = get_list('defined_vars')
         self.used_attrs = get_list('used_attrs')
+        self.used_attrs_tree = {}
         self.used_vars = get_list('used_vars')
         self.tuple_assign_vars = get_list('tuple_assign_vars')
         self.names_imported_as_aliases = get_list('names_imported_as_aliases')
@@ -245,6 +246,35 @@ class Vulture(ast.NodeVisitor):
         assert bool(name) ^ bool(id_) ^ bool(attr), (typ, dir(node))
         return Item(name or id_ or attr, typ, self.filename, node.lineno)
 
+    def _get_provenance(self, node):
+        if isinstance(node, ast.Name):
+            provenance = [node.id]
+        elif isinstance(node, ast.Attribute):
+            provenance = self._get_provenance(node.value) + [node.attr]
+        elif isinstance(node, ast.Subscript):
+            provenance = self._get_provenance(node.value) + [tuple(self._get_provenance(node.slice))]
+        elif isinstance(node, ast.Call):
+            provenance = self._get_provenance(node.func)
+            sublevels = []
+            for argument in node.args:
+                sub_level = self._get_provenance(argument)
+                if isinstance(sub_level, list):
+                    sub_level = tuple(sub_level)
+                sublevels.append(sub_level)
+            provenance.append(tuple(sublevels))
+        else:
+            provenance = [ast.dump(node, annotate_fields=False)]
+        return provenance
+
+    def _update_provenance(self, provenance, current_level):
+        if isinstance(provenance, list):
+            if provenance[0] not in current_level:
+                current_level[provenance[0]] = {}
+            if len(provenance) > 1:
+                self._update_provenance(provenance[1:], current_level[provenance[0]])
+        else:
+            current_level[provenance] = {}
+
     def _ignore_function(self, name):
         ignore = (
             (name.startswith('__') and name.endswith('__')) or
@@ -292,6 +322,8 @@ class Vulture(ast.NodeVisitor):
             self.defined_attrs.append(item)
         elif isinstance(node.ctx, ast.Load):
             self.used_attrs.append(item)
+            self._update_provenance(self._get_provenance(node),
+                                    self.used_attrs_tree)
 
     def visit_Name(self, node):
         if (isinstance(node.ctx, ast.Load) and
