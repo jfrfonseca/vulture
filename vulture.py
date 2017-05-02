@@ -34,6 +34,7 @@ import os
 import re
 import sys
 import tokenize
+from pprint import pprint, pformat
 
 __version__ = '0.14'
 
@@ -418,6 +419,9 @@ analyzes all contained *.py files.
         '--exclude', action='callback', callback=csv,
         type='string', default=[],
         help='Comma-separated list of paths to ignore (e.g. .svn,external)')
+    parser.add_option(
+        '-p', '--provenance', action='store_true',
+        help='Export Provenance of attributes instead of the unused code')
     parser.add_option('-v', '--verbose', action='store_true')
     options, args = parser.parse_args()
     return options, args
@@ -427,7 +431,11 @@ def main():
     options, args = parse_args()
     vulture = Vulture(exclude=options.exclude, verbose=options.verbose)
     vulture.scavenge(args)
-    sys.exit(vulture.report())
+    if options.provenance:
+        pprint(vulture.used_attrs_tree)
+        sys.exit(0)
+    else:
+        sys.exit(vulture.report())
 
 
 if __name__ == '__main__':
